@@ -13,7 +13,7 @@ cdef double dense_dist_mat_at_ij(double[:] dist, int i, int j, int n):
 
     return dist[idx]
 
-cpdef tuple wsp_fast(int n_rep, np.ndarray[np.double_t, ndim=1] mean, np.ndarray[np.double_t, ndim=2] data):
+cpdef tuple well_scattered_points(int n_rep, np.ndarray[np.double_t, ndim=1] mean, np.ndarray[np.double_t, ndim=2] data):
     cdef int n = data.shape[0]
     
     # if the cluster contains less than no. of rep points, all points are rep points

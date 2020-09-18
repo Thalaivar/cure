@@ -1,7 +1,7 @@
 import numpy as np
 import logging
 import itertools
-from _heapq import heapify, heappush, heappop
+from _heapq import *
 from tqdm import tqdm
 from sklearn.neighbors import KDTree
 from sklearn.neighbors import BallTree
@@ -98,14 +98,13 @@ class CURE:
         self.labels_ = None
 
     def _process(self, data, n_clusters, init_w_clusters=False):
-        if not init_w_clusters:
+        if init_w_clusters:
+            self._init_w_clusters(data)
+        else:
             self._create_kdtree(data)
             self._create_heap(data)
-        else:
-            self._init_w_clusters(data)
 
         u = heappop(self.heap_)
-
         while len(self.heap_) > n_clusters:
             logging.info(f'clusters in heap: {len(self.heap_)}, desired clusters: {n_clusters}')
             v = u.closest
@@ -157,7 +156,7 @@ class CURE:
                 
             u = heappushpop(self.heap_, w)
 
-        self._create_assignments(data)
+        # self._create_assignments()
     
     def _create_heap(self, data):
         self.heap_ = [cure_cluster(data[i], i, **self.cluster_args) for i in range(data.shape[0])]
@@ -176,7 +175,6 @@ class CURE:
         heapify(self.heap_)
 
     def _create_kdtree(self, data):
-
         self.tree_ = KDTree(data)
         # initially, every point is active in tree
         self.active_points = np.ones((data.shape[0],), dtype=np.int8)
@@ -288,19 +286,42 @@ class CURE:
     def _pre_cluster(self, data):
         parts = self._partition_dataset(data)
         clusters = []
+        
+        from pyclustering.cluster.cure import cure as fast_cure
         for i in tqdm(range(len(parts))):
-            self._process(parts[i], self.k_per_part)
-            clusters.extend(self.heap_)            
+            fcure = fast_cure(parts[i], self.k_per_part, self.cluster_args['n_rep'], self.cluster_args['alpha'], ccore=True)
+            fcure.process()
+            grouped_assignments = fcure.get_clusters()
+            
+            # create clusters for partition
+            for grp in grouped_assignments:
+                clusters.append(cure_cluster(parts[i][grp,:], grp, **self.cluster_args))            
+        
+        for c in clusters:
+            c._calculate_mean()
+            c._exemplars_from_data()
 
         return clusters
-
+    
     def _init_w_clusters(self, clusters):
+        data = []
+        i = 0
+        for c in clusters:
+            data.extend(c.rep)
+            c.rep_idx = [i + j for j in range(len(c.rep))]
+            i += len(c.rep)
+        data = np.vstack(data)
+        self._create_kdtree(data)
+
         self.heap_ = clusters
+        for c in self.heap_:
+            closest_rep_idx, min_dist = self._closest_cluster(c, np.inf)
+            if closest_rep_idx is not None:
+                c.closest = self._find_cluster_with_rep_idx(closest_rep_idx)
+                c.distance = min_dist
+        
         heapify(self.heap_)
 
-        data = np.vstack([c.data for c in clusters])
-        self._create_kdtree(data)
-        
     def fit(self, data):
         if self.n_parts > 1:
             clusters = self._pre_cluster(data)
